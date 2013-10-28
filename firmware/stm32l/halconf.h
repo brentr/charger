@@ -104,7 +104,7 @@
  * @brief   Enables the PWM subsystem.
  */
 #if !defined(HAL_USE_PWM) || defined(__DOXYGEN__)
-#define HAL_USE_PWM                 TRUE
+#define HAL_USE_PWM                 FALSE
 #endif
 
 /**
@@ -139,7 +139,7 @@
  * @brief   Enables the SPI subsystem.
  */
 #if !defined(HAL_USE_SPI) || defined(__DOXYGEN__)
-#define HAL_USE_SPI                 TRUE
+#define HAL_USE_SPI                 FALSE
 #endif
 
 /**
@@ -273,7 +273,7 @@
  *          default configuration.
  */
 #if !defined(SERIAL_DEFAULT_BITRATE) || defined(__DOXYGEN__)
-#define SERIAL_DEFAULT_BITRATE      38400
+#define SERIAL_DEFAULT_BITRATE      115200
 #endif
 
 /**
@@ -284,7 +284,7 @@
  *          buffers.
  */
 #if !defined(SERIAL_BUFFERS_SIZE) || defined(__DOXYGEN__)
-#define SERIAL_BUFFERS_SIZE         16
+#define SERIAL_BUFFERS_SIZE         64
 #endif
 
 /*===========================================================================*/
