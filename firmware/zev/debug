@@ -1,0 +1,16 @@
+#!/bin/sh
+#Start a gdb session with the (local) openocd target -- 10/27/13 brent@mbari.org
+#  first run make unless GDBstart env var is defined
+cd `dirname $0`
+: ${binary:=build/zev.elf}
+: ${targetLog:=target.log}
+[ $GDBstart ] || make || exit $?
+: ${GDBstart:=../stm32l/start.gdb}
+: ${GDB:=/cortex/bin/gdb}
+
+openocd --log $targetLog &
+ocdpid=$!
+trap "exec 2>/dev/null; kill $ocdpid && wait $!" EXIT INT QUIT HUP PIPE
+
+echo "==>  \`tail -f $targetLog\` to monitor target debug log  <=="
+$GDB -x $GDBstart "$@" $binary

@@ -1,0 +1,16 @@
+# Compiled Objects #
+####################
+*.o
+*.so
+*.d
+*.lst
+*.bin
+*.dmp
+*.elf
+*.hex
+*.map
+
+# Generated logs #
+##################
+*.log
+
