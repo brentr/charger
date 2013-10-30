@@ -161,6 +161,7 @@ void logPanic(const char *panicTxt)
 {
   if (!panicTxt)
     panicTxt = "<stack crash>";
+  debugPuts("PANIC!");
   debugPuts(panicTxt);
   chSysLock();
   chSchGoSleepS(THD_STATE_FINAL);
