@@ -115,7 +115,7 @@ TCPPSRC =
 # List ASM source files here
 ASMSRC = $(PORTASM)
 
-INCDIR = ../stm32l $(OVERLAY)/os \
+INCDIR = ../stm32l-discovery $(OVERLAY)/os \
          $(PORTINC) $(KERNINC) $(TESTINC) \
          $(HALINC) $(PLATFORMINC) $(BOARDINC) \
          $(CHIBIOS)/os/various

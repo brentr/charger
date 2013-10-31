@@ -1,4 +1,4 @@
-source ../stm32l/target.gdb
+source ../stm32l-discovery/target.gdb
 load
 monitor reset halt
 tbreak main

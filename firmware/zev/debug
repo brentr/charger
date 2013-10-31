@@ -5,7 +5,7 @@ cd `dirname $0`
 : ${binary:=build/zev.elf}
 : ${targetLog:=target.log}
 [ $GDBstart ] || make || exit $?
-: ${GDBstart:=../stm32l/start.gdb}
+: ${GDBstart:=../stm32l-discovery/start.gdb}
 : ${GDB:=/cortex/bin/gdb}
 
 openocd --log $targetLog &
