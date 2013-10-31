@@ -8,6 +8,8 @@
 *  Data printed to the queue when full are silently discarded
 *  (It never blocks)
 *
+*  Does not support output from interrupt handlers
+*
 *  Any ChibiOS panic messages are output to the host
 *
 *  This code is an example of using the openocd debug message system.
@@ -41,6 +43,7 @@ int debugPutc(int c);
 size_t debugPut(const uint8_t *block, size_t n);
 /*
   truncate any block > 255 bytes
+  returns # of characters actually sent to host
 */
 
 size_t debugPuts(const char *str);

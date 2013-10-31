@@ -3,7 +3,7 @@
  *   Dominic.Rath@gmx.de                                                   *
  *   Copyright (C) 2008 by Spencer Oliver                                  *
  *   spen@spen-soft.co.uk                                                  *
- *   revised by:  brent@mbari.org  10/27/13                                  *
+ *   revised by:  brent@mbari.org  10/27/13                                *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -24,8 +24,6 @@
 #ifndef DCCPUT_H
 #define DCCPUT_H
 
-#include <stddef.h>
-#include <stdint.h>
 #include "ch.h"
 
 void DCCputU32(const uint32_t *val, size_t len);

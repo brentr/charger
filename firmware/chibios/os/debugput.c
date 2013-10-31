@@ -8,6 +8,8 @@
 *  Data printed to the queue when full are silently discarded
 *  (It never blocks)
 *
+*  Does not support output from interrupt handlers
+*
 *  Any ChibiOS panic messages are output to the host
 *
 ***************************************************************/
@@ -24,7 +26,7 @@
  * Small working area for the debug output thread
  */
 static Thread *debugReader;
-static WORKING_AREA(debugReaderArea, 32);
+static WORKING_AREA(debugReaderArea, 128);
 static OutputQueue debugOutQ;
 static MUTEX_DECL(debugOutLock);
 
@@ -50,12 +52,8 @@ static uint8_t fetcher(void *outQ)
   OutputQueue *q = outQ;
   msg_t b;
   chSysLock();
-  while(TRUE) {
-    b = chOQGetI(q);
-    if (b != Q_EMPTY)
-      break;
+  while((b = chOQGetI(q)) == Q_EMPTY)
     chSchGoSleepS(THD_STATE_WTQUEUE);
-  }
   chSysUnlock();
   return b;
 }
@@ -107,10 +105,9 @@ int debugPutc(int c)
 size_t debugPut(const uint8_t *block, size_t n)
 /*
   truncate any block > 255 bytes
+  returns # of characters actually sent to host
 */
 {
-  if (chOQIsFullI(&debugOutQ))
-    return -1;
   if (n) {
     chMtxLock(&debugOutLock);
     size_t space = chOQGetEmptyI(&debugOutQ);
@@ -124,7 +121,8 @@ size_t debugPut(const uint8_t *block, size_t n)
         chOQWriteTimeout( &debugOutQ, block, n, TIME_IMMEDIATE);
         resumeReader();
       }
-    }
+    }else
+      n = 0;
     chMtxUnlock();
   }else
     debugPutc('\n');
