@@ -5,8 +5,8 @@
 *  A low priority thread empties the debugOutput queue to the
 *  host debugger communication port
 *
-*  Data printed to the queue when full are silently discarded
-*  (It never blocks)
+*  Data printed to the queue when full are discarded
+*  (Never blocks waiting for the host)
 *
 *  Does not support output from interrupt handlers
 *
@@ -89,6 +89,9 @@ Thread *debugPutInit(char *outq, size_t outqSize)
 
 
 int debugPutc(int c)
+/*
+  returns -1 if output fails
+*/
 {
   chMtxLock(&debugOutLock);
   if (chOQGetEmptyI(&debugOutQ) > 1) {
@@ -105,7 +108,7 @@ int debugPutc(int c)
 size_t debugPut(const uint8_t *block, size_t n)
 /*
   truncate any block > 255 bytes
-  returns # of characters actually sent to host
+  returns # of characters actually output (including the trailing newline)
 */
 {
   if (n) {
@@ -120,12 +123,14 @@ size_t debugPut(const uint8_t *block, size_t n)
         chOQPutTimeout( &debugOutQ, n, TIME_IMMEDIATE);
         chOQWriteTimeout( &debugOutQ, block, n, TIME_IMMEDIATE);
         resumeReader();
+        n++;
       }
     }else
       n = 0;
     chMtxUnlock();
   }else
-    debugPutc('\n');
+    if (debugPutc('\n') >= 0)
+      n = 1;
   return n;
 }
 
@@ -136,6 +141,84 @@ size_t debugPuts(const char *str)
 
 
 #if debugPrintBufSize > 0
+/*
+  printf like debug messages to host via ARM DCC
+  RAM is precious, so we expand the printf string twice;
+  once to determine its length and again to queue it.
+*/
+
+struct NullStreamVMT {
+   _base_sequential_stream_methods
+};
+
+typedef struct  {
+  const struct NullStreamVMT *vmt;
+  size_t  len;
+} NullStream;
+
+static size_t nullWrites(void *ip, const uint8_t *bp, size_t n) {
+  NullStream *nsp = ip;
+  (void)bp;
+  if (debugPrintBufSize - nsp->len < n)
+    n = debugPrintBufSize - nsp->len;
+  nsp->len += n;
+  return n;
+}
+
+static size_t nullReads(void *ip, uint8_t *bp, size_t n) {
+  (void)ip; (void) bp; (void) n;
+  return RDY_RESET;
+}
+
+static msg_t nullPut(void *ip, uint8_t b) {
+  NullStream *nsp = ip;
+  (void)b;
+  if (nsp->len >= debugPrintBufSize)
+    return RDY_RESET;
+  nsp->len++;
+  return RDY_OK;
+}
+
+static msg_t nullGet(void *ip) {
+  (void)ip;
+  return RDY_RESET;
+}
+
+static const struct NullStreamVMT nullVmt = 
+  {nullWrites, nullReads, nullPut, nullGet};
+
+
+struct qStreamVMT {
+   _base_sequential_stream_methods
+};
+
+
+typedef struct  {
+  const struct qStreamVMT *vmt;
+  size_t  space;
+} qStream;
+
+
+static size_t qwrites(void *ip, const uint8_t *bp, size_t n) {
+  qStream *qsp = ip;
+  if (n > qsp->space)
+    n = qsp->space;
+  qsp->space -= n;
+  chOQWriteTimeout( &debugOutQ, bp, n, TIME_IMMEDIATE);
+  return n;
+}
+
+static msg_t qput(void *ip, uint8_t b) {
+  qStream *qsp = ip;
+  if (!qsp->space)
+    return RDY_RESET;
+  --qsp->space;
+  chOQPutTimeout( &debugOutQ, b, TIME_IMMEDIATE);    
+  return RDY_OK;
+}
+
+static const struct qStreamVMT qVmt = {qwrites, nullReads, qput, nullGet};
+
 
 size_t debugPrint(const char *fmt, ...)
 /*
@@ -143,18 +226,33 @@ size_t debugPrint(const char *fmt, ...)
   outputs a trailing newline
 */
 {
-  size_t len;
   va_list ap;
   va_start(ap, fmt);
-  static MUTEX_DECL(debugPrintLock);
-  static uint8_t buf[debugPrintBufSize];
-  static MemoryStream dbgStream;
-  chMtxLock(&debugPrintLock);
-  msObjectInit(&dbgStream, buf, sizeof(buf), 0);
-  chvprintf((BaseSequentialStream *) &dbgStream, fmt, ap);
+  NullStream lenStream = {&nullVmt, 0};
+  chvprintf((BaseSequentialStream *) &lenStream, fmt, ap);
+  size_t len = lenStream.len;
+  if (len) {
+    chMtxLock(&debugOutLock);
+    size_t qspace = chOQGetEmptyI(&debugOutQ);
+    if (qspace) {
+      if (len >= qspace)
+        len = qspace - 1;  //truncate string if it won't fit in queue
+      if (len) {
+        if (len > 255)
+          len = 255;
+        qStream dbgStream = {&qVmt, len};
+        chOQPutTimeout(&debugOutQ, len, TIME_IMMEDIATE);  
+        chvprintf((BaseSequentialStream *) &dbgStream, fmt, ap);
+        resumeReader();
+        len++;
+      }
+    }else
+      len=0;
+    chMtxUnlock();
+  }else
+    if (debugPutc('\n') >= 0)
+      len=1;
   va_end(ap);
-  debugPut(buf, len=dbgStream.eos);
-  chMtxUnlock();
   return len;
 }
 

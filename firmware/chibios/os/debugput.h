@@ -5,8 +5,8 @@
 *  A low priority thread empties the debugOutput queue to the
 *  host debugger communication port
 *
-*  Data printed to the queue when full are silently discarded
-*  (It never blocks)
+*  Data printed to the queue when full are discarded
+*  (Never blocks waiting for the host)
 *
 *  Does not support output from interrupt handlers
 *
@@ -30,7 +30,7 @@
 
 #include <ch.h>
 
-//# bytes to reserve for debugging print buffer.  0 omits debugPrint()
+//max length of debugPrint() string.  0 omits debugPrint()
 #define debugPrintBufSize 250  
 
 Thread *debugPutInit(char *outq, size_t outqSize);
@@ -42,26 +42,24 @@ Thread *debugPutInit(char *outq, size_t outqSize);
 #define debugPrintInit(q)  debugPutInit(q, sizeof q)
 
 int debugPutc(int c);
+/*
+  returns -1 if output fails
+*/
 
 size_t debugPut(const uint8_t *block, size_t n);
 /*
   truncate any block > 255 bytes
-  returns # of characters actually sent to host
+  returns # of characters actually output (including the trailing newline)
 */
 
 size_t debugPuts(const char *str);
-
-size_t debugPrint(const char *fmt, ...);
-/*
-  printf style debugging output
-  outputs a trailing newline
-*/
 
 #if debugPrintBufSize > 0
 size_t debugPrint(const char *fmt, ...);
 /*
   printf style debugging output
   outputs a trailing newline
+  returns # of characters actually output (including the trailing newline)
 */
 #endif
 
