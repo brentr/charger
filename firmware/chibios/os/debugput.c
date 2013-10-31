@@ -134,22 +134,31 @@ size_t debugPuts(const char *str)
   return debugPut( (const uint8_t *)str, strlen(str) );
 }
 
+
+#if debugPrintBufSize > 0
+
 size_t debugPrint(const char *fmt, ...)
 /*
   printf style debugging output
   outputs a trailing newline
 */
 {
-  uint8_t buf[255];
-  MemoryStream stream;
+  size_t len;
   va_list ap;
   va_start(ap, fmt);
-  msObjectInit(&stream, buf, sizeof(buf), 0);
-  chvprintf((BaseSequentialStream *) &stream, fmt, ap);
+  static MUTEX_DECL(debugPrintLock);
+  static uint8_t buf[debugPrintBufSize];
+  static MemoryStream dbgStream;
+  chMtxLock(&debugPrintLock);
+  msObjectInit(&dbgStream, buf, sizeof(buf), 0);
+  chvprintf((BaseSequentialStream *) &dbgStream, fmt, ap);
   va_end(ap);
-  debugPut(buf, stream.eos);
-  return stream.eos;
+  debugPut(buf, len=dbgStream.eos);
+  chMtxUnlock();
+  return len;
 }
+
+#endif
 
 
 void logPanic(const char *panicTxt)

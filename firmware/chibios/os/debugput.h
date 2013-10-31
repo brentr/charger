@@ -30,6 +30,9 @@
 
 #include <ch.h>
 
+//# bytes to reserve for debugging print buffer.  0 omits debugPrint()
+#define debugPrintBufSize 250  
+
 Thread *debugPutInit(char *outq, size_t outqSize);
 /*
   allocate output queue of outqSize bytes and start background thread
@@ -53,3 +56,12 @@ size_t debugPrint(const char *fmt, ...);
   printf style debugging output
   outputs a trailing newline
 */
+
+#if debugPrintBufSize > 0
+size_t debugPrint(const char *fmt, ...);
+/*
+  printf style debugging output
+  outputs a trailing newline
+*/
+#endif
+
