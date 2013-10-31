@@ -1,4 +1,4 @@
-/**********************  debugput.c  ************************
+/**********************  debugput.h  ************************
 *
 *  Display debug output on host via ARM DCC
 *
