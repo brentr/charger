@@ -50,7 +50,7 @@ int main(void) {
   chSysInit();
   debugPrintInit(debugOutput);
 
-  const char signon[] = "ZEV Charger v0.01 -- 10/27/13 brent@mbari.org";
+  const char signon[] = "ZEV Charger v0.02 -- 10/30/13 brent@mbari.org";
   debugPuts(signon);
 
   palSetPadMode(GPIOB, 7, PAL_MODE_OUTPUT_PUSHPULL);
