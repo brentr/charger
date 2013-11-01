@@ -81,8 +81,8 @@ Thread *debugPutInit(char *outq, size_t outqSize)
   return background thread
 */
 {
-  chOQInit(&debugOutQ, (uint8_t *)outq, outqSize, NULL, NULL);  
-  return debugReader = 
+  chOQInit(&debugOutQ, (uint8_t *)outq, outqSize, NULL, NULL);
+  return debugReader =
     chThdCreateStatic(debugReaderArea, sizeof(debugReaderArea),
                           LOWPRIO, debugReaderMain, NULL);
 }
@@ -140,7 +140,7 @@ size_t debugPuts(const char *str)
 }
 
 
-#if debugPrintBufSize > 0
+#if debugPrintBufSize < 0
 /*
   printf like debug messages to host via ARM DCC
   RAM is precious, so we expand the printf string twice;
@@ -184,7 +184,7 @@ static msg_t nullGet(void *ip) {
   return RDY_RESET;
 }
 
-static const struct NullStreamVMT nullVmt = 
+static const struct NullStreamVMT nullVmt =
   {nullWrites, nullReads, nullPut, nullGet};
 
 
@@ -213,7 +213,7 @@ static msg_t qput(void *ip, uint8_t b) {
   if (!qsp->space)
     return RDY_RESET;
   --qsp->space;
-  chOQPutTimeout( &debugOutQ, b, TIME_IMMEDIATE);    
+  chOQPutTimeout( &debugOutQ, b, TIME_IMMEDIATE);
   return RDY_OK;
 }
 
@@ -241,7 +241,7 @@ size_t debugPrint(const char *fmt, ...)
         if (len > 255)
           len = 255;
         qStream dbgStream = {&qVmt, len};
-        chOQPutTimeout(&debugOutQ, len, TIME_IMMEDIATE);  
+        chOQPutTimeout(&debugOutQ, len, TIME_IMMEDIATE);
         chvprintf((BaseSequentialStream *) &dbgStream, fmt, ap);
         resumeReader();
         len++;
@@ -253,6 +253,29 @@ size_t debugPrint(const char *fmt, ...)
     if (debugPutc('\n') >= 0)
       len=1;
   va_end(ap);
+  return len;
+}
+
+#elif debugPrintBufSize > 0  //use global buffer to avoid expanding printf twice
+
+size_t debugPrint(const char *fmt, ...)
+/*
+  printf style debugging output
+  outputs a trailing newline
+*/
+{
+  size_t len;
+  va_list ap;
+  va_start(ap, fmt);
+  static MUTEX_DECL(debugPrintLock);
+  static uint8_t buf[debugPrintBufSize];
+  static MemoryStream dbgStream;
+  chMtxLock(&debugPrintLock);
+  msObjectInit(&dbgStream, buf, sizeof(buf), 0);
+  chvprintf((BaseSequentialStream *) &dbgStream, fmt, ap);
+  va_end(ap);
+  debugPut(buf, len=dbgStream.eos);
+  chMtxUnlock();
   return len;
 }
 
