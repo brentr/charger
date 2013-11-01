@@ -56,7 +56,7 @@ size_t debugPut(const uint8_t *block, size_t n);
 
 size_t debugPuts(const char *str);
 
-#if debugPrintBufSize > 0
+#if debugPrintBufSize
 size_t debugPrint(const char *fmt, ...);
 /*
   printf style debugging output

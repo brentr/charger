@@ -159,8 +159,8 @@ typedef struct  {
 static size_t nullWrites(void *ip, const uint8_t *bp, size_t n) {
   NullStream *nsp = ip;
   (void)bp;
-  if (debugPrintBufSize - nsp->len < n)
-    n = debugPrintBufSize - nsp->len;
+  if (-debugPrintBufSize - nsp->len < n)
+    n = -debugPrintBufSize - nsp->len;
   nsp->len += n;
   return n;
 }
@@ -173,7 +173,7 @@ static size_t nullReads(void *ip, uint8_t *bp, size_t n) {
 static msg_t nullPut(void *ip, uint8_t b) {
   NullStream *nsp = ip;
   (void)b;
-  if (nsp->len >= debugPrintBufSize)
+  if (nsp->len >= -debugPrintBufSize)
     return RDY_RESET;
   nsp->len++;
   return RDY_OK;
