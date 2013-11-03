@@ -53,8 +53,6 @@ int main(void) {
   const char signon[] = "ZEV Charger v0.02 -- 10/30/13 brent@mbari.org";
   debugPuts(signon);
 
-  palSetPadMode(GPIOB, 7, PAL_MODE_OUTPUT_PUSHPULL);
-
   /*
    * Activated serial driver 1 using the driver default configuration.
    * PA9 and PA10 are routed to USART1.
@@ -80,9 +78,9 @@ int main(void) {
     while ((key = chnGetTimeout(&SD1, TIME_IMMEDIATE)) != Q_TIMEOUT)
       if (key == (key & 0x7f) && chnPutTimeout(&SD1, key, 10) == Q_TIMEOUT)
         debugPrint("\nCan't write key code 0x%02x", key);
-    palSetPad(GPIOB, 7);
+    palSetPad(GPIOB, GPIOB_LED3);  //Green
     chThdSleepMilliseconds(500);
-    palClearPad(GPIOB, 7);
+    palClearPad(GPIOB, GPIOB_LED3);
     chThdSleepMilliseconds(250);
 
     msg_t err = adcConvert(&ADCD1, &adcgrpcfg, samples, ADC_GRP1_BUF_DEPTH);

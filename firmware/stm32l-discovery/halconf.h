@@ -34,7 +34,7 @@
  * @brief   Enables the TM subsystem.
  */
 #if !defined(HAL_USE_TM) || defined(__DOXYGEN__)
-#define HAL_USE_TM                  TRUE
+#define HAL_USE_TM                  FALSE
 #endif
 
 /**
@@ -49,6 +49,13 @@
  */
 #if !defined(HAL_USE_ADC) || defined(__DOXYGEN__)
 #define HAL_USE_ADC                 TRUE
+#endif
+
+/**
+ * @brief   Enables the DAC subsystem.
+ */
+#if !defined(HAL_USE_DAC) || defined(__DOXYGEN__)
+#define HAL_USE_DAC                 FALSE
 #endif
 
 /**
