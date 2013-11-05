@@ -65,6 +65,7 @@ __attribute__((noreturn))
 static msg_t debugReaderMain(void *arg)
 {
   (void) arg;
+  chRegSetThreadName("debugQreader");
   while (TRUE) {
     size_t len = fetcher(&debugOutQ);
     if (len)
