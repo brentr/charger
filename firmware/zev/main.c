@@ -62,7 +62,7 @@ int main(void) {
   palSetPadMode(GPIOA, 10, PAL_MODE_ALTERNATE(7));  //RX
   palSetPadMode(GPIOA, 11, PAL_MODE_ALTERNATE(7));  //CTS
   palSetPadMode(GPIOA, 12, PAL_MODE_ALTERNATE(7));  //RTS
-  
+
   chprintf(&SD1, "\r\n%s\r\n", signon);
 
   /*
