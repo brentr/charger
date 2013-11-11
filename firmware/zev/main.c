@@ -50,7 +50,7 @@ int main(void) {
   chSysInit();
   debugPrintInit(debugOutput);
 
-  const char signon[] = "ZEV Charger v0.02 -- 10/30/13 brent@mbari.org";
+  const char signon[] = "ZEV Charger v0.03 -- 11/10/13 brent@mbari.org";
   debugPuts(signon);
 
   /*
@@ -73,6 +73,13 @@ int main(void) {
   adcSTM32EnableTSVREFE();
   palSetPadMode(GPIOC, 0, PAL_MODE_INPUT_ANALOG);
 
+  /*
+   * Enable DAC channel 1
+   */
+  palSetPadMode(GPIOA, 4, PAL_MODE_INPUT_ANALOG);
+  RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+  DAC->CR = DAC_CR_EN1;
+
   while (1) {
     int key;
     while ((key = chnGetTimeout(&SD1, TIME_IMMEDIATE)) != Q_TIMEOUT)
@@ -91,7 +98,10 @@ int main(void) {
       avg_ch1 = (samples[0] + samples[2] + samples[4] + samples[6]) / 4;
       avg_ch2 = (samples[1] + samples[3] + samples[5] + samples[7]) / 4;
 
-      debugPrint("ADC ch1 reads %d counts, ch2 reads %d", avg_ch1, avg_ch2);
+      debugPrint("DAC1 = %d, ADC1 = %d counts, ADC2 = %d",
+	  				DAC->DOR1, avg_ch1, avg_ch2);
+
+	  DAC->DHR12R1 = (DAC->DOR1+1) & 0xfff;
     }else
       debugPrint("adcConvert returned err #%d", err);
   }
