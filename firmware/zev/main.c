@@ -50,8 +50,15 @@ static const ADCConversionGroup adcgrpcfg = {
 int main(void) {
   halInit();
   chSysInit();
-  debugPrintInit(debugOutput);
 
+  /*
+   *  Disable Power Supply
+   */
+  const char *power = "off";
+  palSetPadMode(GPIOC, 8, PAL_MODE_OUTPUT_OPENDRAIN);
+  palClearPad(GPIOC, 8);
+
+  debugPrintInit(debugOutput);
   const char signon[] = "ZEV Charger v0.04 -- 11/16/13 brent@mbari.org";
   debugPuts(signon);
 
@@ -85,28 +92,26 @@ int main(void) {
   DAC->CR = DAC_CR_EN1;
 
   /*
-   *  Power Supply Enable
-   */
-  palSetPadMode(GPIOC, 8, PAL_MODE_OUTPUT_OPENDRAIN);
-  palSetPad(GPIOC, 8);
-
-  /*
    *  Piezo buzzer output
    */
   palSetPadMode(GPIOC, 9, PAL_MODE_OUTPUT_OPENDRAIN);
+  
 
   while (1) {
     int key;
+
     while ((key = chnGetTimeout(&SD1, TIME_IMMEDIATE)) != Q_TIMEOUT)
       if (!(key & ~0x7f)) {
-        if (chnPutTimeout(&SD1, key, 10) == Q_TIMEOUT)
-          debugPrint("\nCan't write key code 0x%02x", key);
-        else switch (key) {
+        switch (key) {
           case '0':  //turn off power supply
             palClearPad(GPIOC, 8);
+            power = "off";
             break;
           case '1':  //turn on power supply
-            palSetPad(GPIOC, 8);
+            if (chTimeNow() > 5000) {
+              palSetPad(GPIOC, 8);
+              power = "ON ";
+            }
             break;
         }
       }
@@ -129,8 +134,10 @@ int main(void) {
       avg_ch2 = (samples[1] + samples[4] + samples[7] + samples[10]) / 4;
       avg_ch3 = (samples[2] + samples[5] + samples[8] + samples[11]) / 4;
 
-      debugPrint("DAC1-> %d, ADC<- %d, %d, %d",
-	  	 DAC->DOR1, avg_ch1, avg_ch2, avg_ch3);
+      debugPrint("%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d",
+	  	 power, DAC->DOR1, avg_ch1, avg_ch2, avg_ch3);
+      chprintf(&SD1, "%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d\r\n",
+	  	 power, DAC->DOR1, avg_ch1, avg_ch2, avg_ch3);
     }else
       debugPrint("adcConvert returned err #%d", err);
   }
