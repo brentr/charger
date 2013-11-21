@@ -4,13 +4,38 @@
 
 #include "debugput.h"
 
+char debugOutput[300];  //debugging output awaiting transmission to host
+
 //#define debugPrint(fmt,...) chprintf(&SD1, fmt, __VA_ARGS__)
 //#define debugPuts(str) debugPrint("%d/r/n", str)
 
-char debugOutput[300];  //debugging output awaiting transmission to host
+#define clearPad(...) palClearPad(__VA_ARGS__)
+#define setPad(...) palSetPad(__VA_ARGS__)
+#define togglePad(...) palTogglePad(__VA_ARGS__)
+#define configurePad(...)  palSetPadMode(__VA_ARGS__)
+#define configureGroup(...)  palSetGroupMode(__VA_ARGS__)
+
+/*  Discrete Digital Outputs  */
+#define GREEN_LED   GPIOB,GPIOB_LED3
+#define BLUE_LED    GPIOB,GPIOB_LED4
+#define BUZZER      GPIOC,9
+#define CHARGER     GPIOC,8
+
+/* Only PA4 and PA5 can be used for analog output
+    PA4 = Charger voltage set point
+*/
+#define ANALOGOUTS    GPIOA, 0x1, 4
+
 
 /* Total number of channels to be sampled by a single ADC operation.*/
 #define ADC_GRP1_NUM_CHANNELS   3
+
+/* The pins PC0 - 2 on the port GPIOC are analog inputs
+    PC0 = High Voltage
+    PC1 = Charger voltage setpoint feedback
+    PC2 = Overvoltage from celltops
+*/
+#define ANALOGINS    GPIOC, 0x7, 0
 
 /* Depth of the conversion buffer, channels are sampled four times each.*/
 #define ADC_GRP1_BUF_DEPTH      4
@@ -23,8 +48,7 @@ static adcsample_t samples[ADC_GRP1_NUM_CHANNELS * ADC_GRP1_BUF_DEPTH];
 /*
  * ADC conversion group.
  * Mode:        Linear buffer, 4 samples of 2 channels, SW triggered.
- * Channels:    IN10, IN11   (48 cycles sample time)
- *              Sensor (192 cycles sample time)
+ * Channels:    IN10, IN11, IN12   (48 cycles sample time)
  */
 static const ADCConversionGroup adcgrpcfg = {
   FALSE,
@@ -55,47 +79,39 @@ int main(void) {
    *  Disable Power Supply
    */
   const char *power = "off";
-  palSetPadMode(GPIOC, 8, PAL_MODE_OUTPUT_OPENDRAIN);
-  palClearPad(GPIOC, 8);
+  configurePad(CHARGER, PAL_MODE_OUTPUT_OPENDRAIN);
+  clearPad(CHARGER);  //turn off charger ASAP
 
   debugPrintInit(debugOutput);
-  const char signon[] = "ZEV Charger v0.04 -- 11/16/13 brent@mbari.org";
+  const char signon[] = "ZEV Charger v0.05 -- 11/20/13 brent@mbari.org";
   debugPuts(signon);
 
   /*
-   * Activated serial driver 1 using the driver default configuration.
-   * PA9 and PA10 are routed to USART1.
+   * Activate serial driver 1 using the driver default configuration.
+   * PA9 through PA12 are routed to USART1.
    */
   sdStart(&SD1, NULL);
-  palSetPadMode(GPIOA, 9, PAL_MODE_ALTERNATE(7));   //TX
-  palSetPadMode(GPIOA, 10, PAL_MODE_ALTERNATE(7));  //RX
-  palSetPadMode(GPIOA, 11, PAL_MODE_ALTERNATE(7));  //CTS
-  palSetPadMode(GPIOA, 12, PAL_MODE_ALTERNATE(7));  //RTS
+  palSetGroupMode(GPIOA, 0xf, 9, PAL_MODE_ALTERNATE(7)); //TX,RX,CTS,RTS
 
   chprintf(&SD1, "\r\n%s\r\n", signon);
 
   /*
-   * Initializes the ADC driver 1 and enable the thermal sensor.
-   * The pins PC0 and PC1 on the port GPIOC are programmed as analog input.
-   */
-  palSetPadMode(GPIOC, 0, PAL_MODE_INPUT_ANALOG);
-  palSetPadMode(GPIOC, 1, PAL_MODE_INPUT_ANALOG);
-  palSetPadMode(GPIOC, 2, PAL_MODE_INPUT_ANALOG);
-  adcStart(&ADCD1, NULL);
-  adcSTM32EnableTSVREFE();
-
-  /*
-   * Enable DAC channel 1
-   */
-  palSetPadMode(GPIOA, 4, PAL_MODE_INPUT_ANALOG);
-  RCC->APB1ENR |= RCC_APB1ENR_DACEN;
-  DAC->CR = DAC_CR_EN1;
-
-  /*
    *  Piezo buzzer output
    */
-  palSetPadMode(GPIOC, 9, PAL_MODE_OUTPUT_OPENDRAIN);
+  configurePad(BUZZER, PAL_MODE_OUTPUT_OPENDRAIN);
   
+  /*
+   * Initializes the ADC driver 1
+   */
+  configureGroup(ANALOGINS, PAL_MODE_INPUT_ANALOG);
+  adcStart(&ADCD1, NULL);
+
+  /*
+   * Enable DAC channel 1 on PA4
+   */
+  configureGroup(ANALOGOUTS, PAL_MODE_INPUT_ANALOG);
+  RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+  DAC->CR = DAC_CR_EN1;
 
   while (1) {
     int key;
@@ -104,12 +120,12 @@ int main(void) {
       if (!(key & ~0x7f)) {
         switch (key) {
           case '0':  //turn off power supply
-            palClearPad(GPIOC, 8);
+            clearPad(CHARGER);
             power = "off";
             break;
           case '1':  //turn on power supply
             if (chTimeNow() > 5000) {
-              palSetPad(GPIOC, 8);
+              setPad(CHARGER);
               power = "ON ";
             }
             break;
@@ -118,11 +134,11 @@ int main(void) {
 
     DAC->DHR12R1 = (DAC->DOR1+1) & 0xfff;
 
-    palSetPad(GPIOB, GPIOB_LED3);  //Green
-    palSetPad(GPIOC, 9);
-    chThdSleepMilliseconds(25);
-    palClearPad(GPIOB, GPIOB_LED3);
-    palClearPad(GPIOC, 9);
+    setPad(GREEN_LED);
+    setPad(BUZZER);
+    chThdSleepMilliseconds(30);
+    clearPad(GREEN_LED);
+    clearPad(BUZZER);
     chThdSleepMilliseconds(35);
 
     msg_t err = adcConvert(&ADCD1, &adcgrpcfg, samples, ADC_GRP1_BUF_DEPTH);
