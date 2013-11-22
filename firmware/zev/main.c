@@ -48,8 +48,10 @@ static adcsample_t samples[ADC_GRP1_NUM_CHANNELS * ADC_GRP1_BUF_DEPTH];
 /*
  * ADC conversion group.
  * Mode:        Linear buffer, 4 samples of 2 channels, SW triggered.
- * Channels:    IN10, IN11, IN12   (48 cycles sample time)
+ * Channels:    IN10, IN11, IN12   (16 cycles sample time)
  */
+#define adcSampleTime  ADC_SAMPLE_16
+
 static const ADCConversionGroup adcgrpcfg = {
   FALSE,
   ADC_GRP1_NUM_CHANNELS,
@@ -59,8 +61,8 @@ static const ADCConversionGroup adcgrpcfg = {
   0,                        /* CR1 */
   ADC_CR2_SWSTART,          /* CR2 */
   0,
-  ADC_SMPR2_SMP_AN10(ADC_SAMPLE_48) | ADC_SMPR2_SMP_AN11(ADC_SAMPLE_48) |
-   ADC_SMPR2_SMP_AN12(ADC_SAMPLE_48),
+  ADC_SMPR2_SMP_AN10(adcSampleTime) | ADC_SMPR2_SMP_AN11(adcSampleTime) |
+   ADC_SMPR2_SMP_AN12(adcSampleTime),
   0,
   ADC_SQR1_NUM_CH(ADC_GRP1_NUM_CHANNELS),
   0,
@@ -99,7 +101,7 @@ int main(void) {
    *  Piezo buzzer output
    */
   configurePad(BUZZER, PAL_MODE_OUTPUT_OPENDRAIN);
-  
+
   /*
    * Initializes the ADC driver 1
    */
