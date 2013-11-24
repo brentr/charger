@@ -5,7 +5,7 @@
  *   spen@spen-soft.co.uk                                                  *
  *   Copyright (C) 2008 by Frederik Kriewtz                                *
  *   frederik@kriewitz.eu                                                  *
- *   revised by:  brent@mbari.org  10/27/13                                  *
+ *   revised by:  brent@mbari.org  10/27/13                                *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
