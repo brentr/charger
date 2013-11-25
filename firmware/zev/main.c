@@ -28,9 +28,6 @@ char debugOutput[300];  //debugging output awaiting transmission to host
 #define ANALOGOUTS    GPIOA, 0x1, 4
 
 
-/* Total number of channels to be sampled by a single ADC operation.*/
-#define ADC_GRP1_NUM_CHANNELS   3
-
 /* The pins PC0 - 2 on the port GPIOC are analog inputs
     PC0 = High Voltage
     PC1 = Charger voltage setpoint feedback
@@ -38,13 +35,17 @@ char debugOutput[300];  //debugging output awaiting transmission to host
 */
 #define ANALOGINS    GPIOC, 0x7, 0
 
-/* Depth of the conversion buffer, channels are sampled four times each.*/
-#define ADC_GRP1_BUF_DEPTH      4
+/* Total number of channels to be sampled by a single ADC operation.*/
+#define ADCchannels   3
 
+/* Depth of the conversion buffer, channels are sampled sixteen times each.*/
+#define ADCdepth      16
+
+#define ADCsamples    (ADCchannels*ADCdepth)
 /*
- * ADC samples buffer.
+ * Raw ADC sample buffers.
  */
-static adcsample_t samples[ADC_GRP1_NUM_CHANNELS * ADC_GRP1_BUF_DEPTH];
+adcsample_t left[ADCsamples], right[ADCsamples];
 
 /*
  * ADC conversion group.
@@ -61,14 +62,14 @@ static adcsample_t samples[ADC_GRP1_NUM_CHANNELS * ADC_GRP1_BUF_DEPTH];
 
 static unsigned totalSamples = 0, totalErrs = 0, count = 0;
 
-static void adcDone(ADCDriver *adcp, adcsample_t *buffer, size_t n)
-{
-  totalSamples += n;
-}
+static Thread *waitingAnalogThread = NULL;
+
+static void adcDone(ADCDriver *adcp, adcsample_t *buffer, size_t n);
 
 static void adcErr(ADCDriver *adcp, adcerror_t err)
 {
-  totalErrs++;
+  (void) adcp; (void) err;
+  totalErrs++;  //restart app if this occurs
 }
 
 static INLINE void setAdcTimebase(uint32_t hz)
@@ -91,24 +92,42 @@ static INLINE void startAdcTimer(uint16_t interval) {
 }
 
 static const ADCConversionGroup adcgrpcfg = {
-  TRUE,
-  ADC_GRP1_NUM_CHANNELS,
+  FALSE,
+  ADCchannels,
   adcDone,
   adcErr,
   /* HW dependent part.*/
-  0,                        /* CR1 */
-  adcTrigger,               /* CR2 -- trigger */
+  0,                          /* CR1 */
+  adcTrigger | ADC_CR2_CONT,  /* CR2 -- trigger */
   0,
   ADC_SMPR2_SMP_AN10(adcSampleTime) | ADC_SMPR2_SMP_AN11(adcSampleTime) |
    ADC_SMPR2_SMP_AN12(adcSampleTime),
   0,
-  ADC_SQR1_NUM_CH(ADC_GRP1_NUM_CHANNELS),
+  ADC_SQR1_NUM_CH(ADCchannels),
   0,
   0,
   0,
   ADC_SQR5_SQ1_N(ADC_CHANNEL_IN10) | ADC_SQR5_SQ2_N(ADC_CHANNEL_IN11) |
   ADC_SQR5_SQ3_N(ADC_CHANNEL_IN12)
 };
+
+
+static void adcDone(ADCDriver *adcp, adcsample_t *buffer, size_t n)
+{
+  (void) n;
+  DAC->DHR12R1 = (DAC->DOR1+1) & 0xfff;    //update DAC
+  chSysLockFromIsr();
+  adcStartConversionI(adcp, &adcgrpcfg,    //alternate sample buffers
+                      buffer==left ? right:left, ADCdepth);
+  /* Wake any waiting analog procesing thread */
+  if (waitingAnalogThread) {   //indicate which buffer to read
+    waitingAnalogThread->p_u.rdymsg = (msg_t) buffer;
+    chSchReadyI(waitingAnalogThread);
+    waitingAnalogThread = NULL;
+  }
+  chSysUnlockFromIsr();
+}
+
 
 int main(void) {
   halInit();
@@ -122,7 +141,7 @@ int main(void) {
   clearPad(CHARGER);  //turn off charger ASAP
 
   debugPrintInit(debugOutput);
-  const char signon[] = "ZEV Charger v0.05 -- 11/20/13 brent@mbari.org";
+  const char signon[] = "ZEV Charger v0.10 -- 11/24/13 brent@mbari.org";
   debugPuts(signon);
 
   /*
@@ -143,22 +162,25 @@ int main(void) {
    * Enable DAC channel 1 on PA4
    */
   configureGroup(ANALOGOUTS, PAL_MODE_INPUT_ANALOG);
-  RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+  rccEnableAPB1(RCC_APB1ENR_DACEN, FALSE);
   DAC->CR = DAC_CR_EN1;
+
+  /*
+   * Configure Adc Timer to output triggers at 20hz
+   */
+  enableAdcTimer();
+  setAdcTimebase(1000);  //1 ms timer tics  
+  startAdcTimer(50);
 
   /*
    * Initializes the ADC driver 1
    */
   configureGroup(ANALOGINS, PAL_MODE_INPUT_ANALOG);
   adcStart(&ADCD1, NULL);
-  adcStartConversion(&ADCD1, &adcgrpcfg, samples, ADC_GRP1_BUF_DEPTH);
+  adcStartConversion(&ADCD1, &adcgrpcfg, left, ADCdepth);
 
-  /*
-   * Configure Adc Timer to output triggers at 200hz
-   */
-  enableAdcTimer();
-  setAdcTimebase(1000);  //1 ms timer tics  
-  startAdcTimer(5);
+  adcsample_t *samples;
+  uint32_t adc[ADCchannels];  //filtered adc inputs
 
   while (1) {
     int key;
@@ -179,27 +201,41 @@ int main(void) {
         }
       }
 
-    DAC->DHR12R1 = (DAC->DOR1+1) & 0xfff;
-
-    setPad(GREEN_LED);
-    setPad(BUZZER);
-    chThdSleepMilliseconds(50);
     clearPad(GREEN_LED);
     clearPad(BUZZER);
-    chThdSleepMilliseconds(50);
 
-    adcsample_t avg_ch1, avg_ch2, avg_ch3;
+    /* Wait for ADC conversions to complete */
+    chSysLock();
+    waitingAnalogThread = chThdSelf();
+    chSchGoSleepS(THD_STATE_SUSPENDED);
+    samples = (adcsample_t *)(chThdSelf()->p_u.rdymsg);
+    chSysUnlock();
 
-    /* Calculates the average values from the ADC samples.*/
-    avg_ch1 = (samples[0] + samples[3] + samples[6] + samples[9]) / 4;
-    avg_ch2 = (samples[1] + samples[4] + samples[7] + samples[10]) / 4;
-    avg_ch3 = (samples[2] + samples[5] + samples[8] + samples[11]) / 4;
-
+    totalSamples++;
+    if (samples==left) {
+      setPad(GREEN_LED);
+      setPad(BUZZER);
+    }
+    /* Calculate the sum of values from the ADC samples.*/
+    unsigned chan;
+    adcsample_t *end = samples + ADCsamples;
+    for(chan=0; chan < ADCchannels; chan++) {
+      adcsample_t *row = samples+chan;
+      uint32_t *cursor = adc+chan;
+      *cursor=0;
+      do {
+        *cursor += *row;
+        row += ADCchannels;
+      } while (row < end);
+      *cursor /= ADCdepth;  //avg just for display for now
+    }
+     
     chprintf(&SD1, "#%d:%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d\r\n",
-	 totalSamples, power, DAC->DOR1, avg_ch1, avg_ch2, avg_ch3);
-    if (count++ >= 5) {
-      debugPrint("#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d (%d errs)",
-	 totalSamples, power, DAC->DOR1, avg_ch1, avg_ch2, avg_ch3, totalErrs);
+	 totalSamples, power, DAC->DOR1, adc[0], adc[1], adc[2]);
+    if (++count >= 10) {
+      debugPrint("@%d#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d (%d errs)",
+        chTimeNow(), totalSamples,
+                      power, DAC->DOR1, adc[0], adc[1], adc[2], totalErrs);
       count = 0;
     }
   }
