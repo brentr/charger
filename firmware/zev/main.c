@@ -39,13 +39,23 @@ char debugOutput[300];  //debugging output awaiting transmission to host
 #define ADCchannels   3
 
 /* Depth of the conversion buffer, channels are sampled sixteen times each.*/
-#define ADCdepth      16
+#define ADCdepth      64
 
 #define ADCsamples    (ADCchannels*ADCdepth)
 /*
- * Raw ADC sample buffers.
+ * Raw ADC sample buffer.
  */
-adcsample_t left[ADCsamples], right[ADCsamples];
+adcsample_t analogSample[2*ADCsamples];
+
+/*
+ * Generate ADCsamples pulses every 1/20second
+ */
+#define adcTimeBase 8000000
+#define adcTimerDivisor (adcTimeBase/(20*ADCdepth))
+
+#if adcTimerDivisor >= 1<<16
+#error  adcTimerDivisor too large
+#endif
 
 /*
  * ADC conversion group.
@@ -81,7 +91,6 @@ static INLINE void setAdcTimebase(uint32_t hz)
  * @brief   Starts the timer in continuous mode.
  */
 static INLINE void startAdcTimer(uint16_t interval) {
-
   stm32_tim_t *tim = adcTimer;
   tim->ARR   = interval - 1;              /* Time constant.           */
   tim->EGR   = STM32_TIM_EGR_UG;          /* Update event.            */
@@ -92,13 +101,13 @@ static INLINE void startAdcTimer(uint16_t interval) {
 }
 
 static const ADCConversionGroup adcgrpcfg = {
-  FALSE,
+  TRUE,
   ADCchannels,
   adcDone,
   adcErr,
   /* HW dependent part.*/
   0,                          /* CR1 */
-  adcTrigger | ADC_CR2_CONT,  /* CR2 -- trigger */
+  adcTrigger,                 /* CR2 -- trigger */
   0,
   ADC_SMPR2_SMP_AN10(adcSampleTime) | ADC_SMPR2_SMP_AN11(adcSampleTime) |
    ADC_SMPR2_SMP_AN12(adcSampleTime),
@@ -116,16 +125,14 @@ static void adcDone(ADCDriver *adcp, adcsample_t *buffer, size_t n)
 {
   (void) n;
   DAC->DHR12R1 = (DAC->DOR1+1) & 0xfff;    //update DAC
-  chSysLockFromIsr();
-  adcStartConversionI(adcp, &adcgrpcfg,    //alternate sample buffers
-                      buffer==left ? right:left, ADCdepth);
   /* Wake any waiting analog procesing thread */
   if (waitingAnalogThread) {   //indicate which buffer to read
+    chSysLockFromIsr();
     waitingAnalogThread->p_u.rdymsg = (msg_t) buffer;
     chSchReadyI(waitingAnalogThread);
     waitingAnalogThread = NULL;
+    chSysUnlockFromIsr();
   }
-  chSysUnlockFromIsr();
 }
 
 
@@ -141,7 +148,7 @@ int main(void) {
   clearPad(CHARGER);  //turn off charger ASAP
 
   debugPrintInit(debugOutput);
-  const char signon[] = "ZEV Charger v0.10 -- 11/24/13 brent@mbari.org";
+  const char signon[] = "ZEV Charger v0.11 -- 11/25/13 brent@mbari.org";
   debugPuts(signon);
 
   /*
@@ -166,18 +173,18 @@ int main(void) {
   DAC->CR = DAC_CR_EN1;
 
   /*
-   * Configure Adc Timer to output triggers at 20hz
+   * Configure Adc Timer
    */
   enableAdcTimer();
-  setAdcTimebase(1000);  //1 ms timer tics  
-  startAdcTimer(50);
+  setAdcTimebase(adcTimeBase);
+  startAdcTimer(adcTimerDivisor);
 
   /*
    * Initializes the ADC driver 1
    */
   configureGroup(ANALOGINS, PAL_MODE_INPUT_ANALOG);
   adcStart(&ADCD1, NULL);
-  adcStartConversion(&ADCD1, &adcgrpcfg, left, ADCdepth);
+  adcStartConversion(&ADCD1, &adcgrpcfg, analogSample, 2*ADCdepth);
 
   adcsample_t *samples;
   uint32_t adc[ADCchannels];  //filtered adc inputs
@@ -212,7 +219,7 @@ int main(void) {
     chSysUnlock();
 
     totalSamples++;
-    if (samples==left) {
+    if (samples==analogSample) {
       setPad(GREEN_LED);
       setPad(BUZZER);
     }
@@ -229,7 +236,7 @@ int main(void) {
       } while (row < end);
       *cursor /= ADCdepth;  //avg just for display for now
     }
-     
+
     chprintf(&SD1, "#%d:%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d\r\n",
 	 totalSamples, power, DAC->DOR1, adc[0], adc[1], adc[2]);
     if (++count >= 10) {
