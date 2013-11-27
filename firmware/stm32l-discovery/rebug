@@ -1,0 +1,2 @@
+#!/bin/sh
+GDBstart=~/stm32l-discovery/restart.gdb exec debug
