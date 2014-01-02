@@ -28,15 +28,21 @@ char debugOutput[300];  //debugging output awaiting transmission to host
 #define ANALOGOUTS    GPIOA, 0x1, 4
 
 
-/* The pins PC0 - 2 on the port GPIOC are analog inputs
+/* The pins PC0 - 2 are analog inputs
     PC0 = High Voltage
     PC1 = Charger voltage setpoint feedback
     PC2 = Overvoltage from celltops
 */
-#define ANALOGINS    GPIOC, 0x7, 0
+#define ANALOGINS_C    GPIOC, 0x7, 0
+
+/* The pins PA1 - 2 are also analog inputs
+    PA1 = Charger Current Sensor VCC/2 (nominally 2.5V)
+    PA2 = Charger Current Sensor (proportional to PA1)
+*/
+#define ANALOGINS_A    GPIOA, 0x6, 1
 
 /* Total number of channels to be sampled by a single ADC operation.*/
-#define ADCchannels   3
+#define ADCchannels   5
 
 /* Depth of the conversion buffer, channels are sampled sixteen times each.*/
 #define ADCdepth      64
@@ -46,6 +52,11 @@ char debugOutput[300];  //debugging output awaiting transmission to host
  * Raw ADC sample buffer.
  */
 adcsample_t analogSample[2*ADCsamples];
+
+/* box car averaging for current measurements */
+#define boxLen     50
+adcsample_t vcc2[boxLen], delta[boxLen];
+unsigned boxCount;
 
 /*
  * Generate ADCsamples pulses every 1/20second
@@ -60,11 +71,11 @@ adcsample_t analogSample[2*ADCsamples];
 /*
  * ADC conversion group.
  * Mode:        Linear buffer, 4 samples of 2 channels, SW triggered.
- * Channels:    IN10, IN11, IN12   (16 cycles sample time)
+ * Channels:    IN10, IN11, IN12, IN13   (16 cycles sample time)
  */
 #define adcSampleTime  ADC_SAMPLE_16
  //Timer 6 trigger
-#define adcTrigger (ADC_CR2_EXTSEL_1|ADC_CR2_EXTSEL_3 | ADC_CR2_EXTEN_0)
+#define adcTrigger (ADC_CR2_EXTSEL_1 | ADC_CR2_EXTSEL_3 | ADC_CR2_EXTEN_0)
 #define adcTimer STM32_TIM6
 #define adcTimerClkRate  STM32_PCLK1
 #define enableAdcTimer() rccEnableAPB1(RCC_APB1ENR_TIM6EN, FALSE)
@@ -78,7 +89,7 @@ static void adcDone(ADCDriver *adcp, adcsample_t *buffer, size_t n);
 
 static void adcErr(ADCDriver *adcp, adcerror_t err)
 {
-  (void) adcp; (void) err;
+  (void)adcp; (void)err;
   totalErrs++;  //restart app if this occurs
 }
 
@@ -111,19 +122,20 @@ static const ADCConversionGroup adcgrpcfg = {
   0,
   ADC_SMPR2_SMP_AN10(adcSampleTime) | ADC_SMPR2_SMP_AN11(adcSampleTime) |
    ADC_SMPR2_SMP_AN12(adcSampleTime),
-  0,
+  ADC_SMPR3_SMP_AN1(adcSampleTime) | ADC_SMPR3_SMP_AN2(adcSampleTime),
   ADC_SQR1_NUM_CH(ADCchannels),
   0,
   0,
   0,
   ADC_SQR5_SQ1_N(ADC_CHANNEL_IN10) | ADC_SQR5_SQ2_N(ADC_CHANNEL_IN11) |
-  ADC_SQR5_SQ3_N(ADC_CHANNEL_IN12)
+   ADC_SQR5_SQ3_N(ADC_CHANNEL_IN12) |
+   ADC_SQR5_SQ4_N(ADC_CHANNEL_IN1) | ADC_SQR5_SQ5_N(ADC_CHANNEL_IN2)
 };
 
 
 static void adcDone(ADCDriver *adcp, adcsample_t *buffer, size_t n)
 {
-  (void) n;
+  (void)n; (void)adcp;
   DAC->DHR12R1 = (DAC->DOR1+1) & 0xfff;    //update DAC
   /* Wake any waiting analog procesing thread */
   if (waitingAnalogThread) {   //indicate which buffer to read
@@ -148,7 +160,7 @@ int main(void) {
   clearPad(CHARGER);  //turn off charger ASAP
 
   debugPrintInit(debugOutput);
-  const char signon[] = "ZEV Charger v0.11 -- 11/25/13 brent@mbari.org";
+  const char signon[] = "ZEV Charger v0.14 -- 1/1/14 brent@mbari.org";
   debugPuts(signon);
 
   /*
@@ -156,7 +168,7 @@ int main(void) {
    * PA9 through PA12 are routed to USART1.
    */
   sdStart(&SD1, NULL);
-  palSetGroupMode(GPIOA, 0xf, 9, PAL_MODE_ALTERNATE(7)); //TX,RX,CTS,RTS
+  configureGroup(GPIOA, 0xf, 9, PAL_MODE_ALTERNATE(7)); //TX,RX,CTS,RTS
 
   chprintf(&SD1, "\r\n%s\r\n", signon);
 
@@ -182,12 +194,15 @@ int main(void) {
   /*
    * Initializes the ADC driver 1
    */
-  configureGroup(ANALOGINS, PAL_MODE_INPUT_ANALOG);
+  configureGroup(ANALOGINS_C, PAL_MODE_INPUT_ANALOG);
+  configureGroup(ANALOGINS_A, PAL_MODE_INPUT_ANALOG);
   adcStart(&ADCD1, NULL);
   adcStartConversion(&ADCD1, &adcgrpcfg, analogSample, 2*ADCdepth);
 
   adcsample_t *samples;
   uint32_t adc[ADCchannels];  //filtered adc inputs
+
+  int32_t deltaOut = 0, vcc2out = 0;
 
   while (1) {
     int key;
@@ -237,12 +252,20 @@ int main(void) {
       *cursor /= ADCdepth;  //avg just for display for now
     }
 
-    chprintf(&SD1, "#%d:%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d\r\n",
-	 totalSamples, power, DAC->DOR1, adc[0], adc[1], adc[2]);
+    if (++boxCount >= boxLen)
+      boxCount=0;
+    deltaOut -= delta[boxCount];
+    deltaOut += (delta[boxCount] = adc[3]-adc[4]);
+    vcc2out -= vcc2[boxCount];
+    vcc2out += (vcc2[boxCount] = adc[3]);
+
+    float amps = 41.08 * (float)deltaOut / vcc2out - 2.925;
+    chprintf(&SD1, "#%d:%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d, Vcc/2=%d, Curr=%d, A=%f\r\n",
+	 totalSamples, power, DAC->DOR1, adc[0], adc[1], adc[2], vcc2out, deltaOut, amps);
     if (++count >= 10) {
-      debugPrint("@%d#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d (%d errs)",
+      debugPrint("@%d#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, Vcc/2=%d, Curr=%d, A=%f (%d errs)",
         chTimeNow(), totalSamples,
-                      power, DAC->DOR1, adc[0], adc[1], adc[2], totalErrs);
+                      power, DAC->DOR1, adc[0], adc[1], adc[2], vcc2out, deltaOut, amps, totalErrs);
       count = 0;
     }
   }
