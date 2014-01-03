@@ -39,7 +39,7 @@ char debugOutput[300];  //debugging output awaiting transmission to host
     PA1 = Charger Current Sensor VCC/2 (nominally 2.5V)
     PA2 = Charger Current Sensor (proportional to PA1)
 */
-#define ANALOGINS_A    GPIOA, 0x6, 1
+#define ANALOGINS_A    GPIOA, 0x3, 1
 
 /* Total number of channels to be sampled by a single ADC operation.*/
 #define ADCchannels   5
@@ -48,15 +48,11 @@ char debugOutput[300];  //debugging output awaiting transmission to host
 #define ADCdepth      64
 
 #define ADCsamples    (ADCchannels*ADCdepth)
+
 /*
  * Raw ADC sample buffer.
  */
 adcsample_t analogSample[2*ADCsamples];
-
-/* box car averaging for current measurements */
-#define boxLen     50
-adcsample_t vcc2[boxLen], delta[boxLen];
-unsigned boxCount;
 
 /*
  * Generate ADCsamples pulses every 1/20second
@@ -80,6 +76,13 @@ unsigned boxCount;
 #define adcTimerClkRate  STM32_PCLK1
 #define enableAdcTimer() rccEnableAPB1(RCC_APB1ENR_TIM6EN, FALSE)
 #define disableAdcTimer() rccDisableAPB1(RCC_APB1ENR_TIM6EN, FALSE)
+
+
+/* ADC counts to Amps converison factors */
+#define ampGain  1.904762e-4f /* ADC counts per amp / ADCdepth */
+#define ampVoff  242          /* ADCdepth * (Vcc/2 ADC counts - ADC counts @ zero current) */
+#define ampVnom  3094         /* nominal Vcc/2 ADC counts */
+
 
 static unsigned totalSamples = 0, totalErrs = 0, count = 0;
 
@@ -160,7 +163,7 @@ int main(void) {
   clearPad(CHARGER);  //turn off charger ASAP
 
   debugPrintInit(debugOutput);
-  const char signon[] = "ZEV Charger v0.14 -- 1/1/14 brent@mbari.org";
+  const char signon[] = "ZEV Charger v0.14 -- 1/2/14 brent@mbari.org";
   debugPuts(signon);
 
   /*
@@ -202,8 +205,6 @@ int main(void) {
   adcsample_t *samples;
   uint32_t adc[ADCchannels];  //filtered adc inputs
 
-  int32_t deltaOut = 0, vcc2out = 0;
-
   while (1) {
     int key;
 
@@ -238,7 +239,7 @@ int main(void) {
       setPad(GREEN_LED);
       setPad(BUZZER);
     }
-    /* Calculate the sum of values from the ADC samples.*/
+    /* Calculate the sum of values for each ADC channel.*/
     unsigned chan;
     adcsample_t *end = samples + ADCsamples;
     for(chan=0; chan < ADCchannels; chan++) {
@@ -251,21 +252,23 @@ int main(void) {
       } while (row < end);
       *cursor /= ADCdepth;  //avg just for display for now
     }
+    /* average the current represented by the last channel to best filter VCC noise */
+    int32_t current = 0;
+    {
+      adcsample_t *currentRow = samples+4;
+      do {
+        current += currentRow[-1] - currentRow[0]; /* vcc/2 - current */
+        currentRow += ADCchannels;
+      } while (currentRow < end);
+    }
 
-    if (++boxCount >= boxLen)
-      boxCount=0;
-    deltaOut -= delta[boxCount];
-    deltaOut += (delta[boxCount] = adc[3]-adc[4]);
-    vcc2out -= vcc2[boxCount];
-    vcc2out += (vcc2[boxCount] = adc[3]);
-
-    float amps = 41.08 * (float)deltaOut / vcc2out - 2.925;
-    chprintf(&SD1, "#%d:%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d, Vcc/2=%d, Curr=%d, A=%f\r\n",
-	 totalSamples, power, DAC->DOR1, adc[0], adc[1], adc[2], vcc2out, deltaOut, amps);
+    float amps = ampGain * (float)(((current+ampVoff) * ampVnom) / (int32_t)adc[3]);
+    chprintf(&SD1, "#%d:%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d, Vcc/2=%d, A=%f\r\n",
+	 totalSamples, power, DAC->DOR1, adc[0], adc[1], adc[2], adc[3], amps);
     if (++count >= 10) {
-      debugPrint("@%d#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, Vcc/2=%d, Curr=%d, A=%f (%d errs)",
+      debugPrint("@%d#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, Vcc/2=%d, curr=%d, A=%f (%d errs)",
         chTimeNow(), totalSamples,
-                      power, DAC->DOR1, adc[0], adc[1], adc[2], vcc2out, deltaOut, amps, totalErrs);
+                      power, DAC->DOR1, adc[0], adc[1], adc[2], adc[3], adc[4], amps, totalErrs);
       count = 0;
     }
   }
