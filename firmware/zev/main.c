@@ -42,7 +42,7 @@ char debugOutput[300];  //debugging output awaiting transmission to host
 #define ANALOGINS_A    GPIOA, 0x3, 1
 
 /* Total number of channels to be sampled by a single ADC operation.*/
-#define ADCchannels   5
+#define ADCchannels   6
 
 /* Depth of the conversion buffer, channels are sampled sixteen times each.*/
 #define ADCdepth      64
@@ -69,7 +69,9 @@ adcsample_t analogSample[2*ADCsamples];
  * Mode:        Linear buffer, 4 samples of 2 channels, SW triggered.
  * Channels:    IN10, IN11, IN12, IN13   (16 cycles sample time)
  */
-#define adcSampleTime  ADC_SAMPLE_16
+#define adcSampleTime    ADC_SAMPLE_16
+#define sensorSampleTime ADC_SAMPLE_96  /* must sample temp sensor for at least 10us */
+
  //Timer 6 trigger
 #define adcTrigger (ADC_CR2_EXTSEL_1 | ADC_CR2_EXTSEL_3 | ADC_CR2_EXTEN_0)
 #define adcTimer STM32_TIM6
@@ -79,9 +81,12 @@ adcsample_t analogSample[2*ADCsamples];
 
 
 /* ADC counts to Amps converison factors */
-#define ampGain  1.904762e-4f /* ADC counts per amp / ADCdepth */
-#define ampVoff  242          /* ADCdepth * (Vcc/2 ADC counts - ADC counts @ zero current) */
-#define ampVnom  3094         /* nominal Vcc/2 ADC counts */
+#define ampScale   1.89e-4f /* ADC counts per amp / ADCdepth */
+#define ampVoffset 0        /* ADCdepth * (ADC counts @ zero current - Vcc/2) */
+#define ampVnom    3124     /* nominal Vcc/2 ADC counts */
+#define ampTnom    611      /* nominal temperature ADC counts */
+#define ampToffset 0.0f     /* offset change per temperature count */
+#define ampTscale  0.0f     /* scale gain change per temperature count */
 
 
 static unsigned totalSamples = 0, totalErrs = 0, count = 0;
@@ -123,6 +128,7 @@ static const ADCConversionGroup adcgrpcfg = {
   0,                          /* CR1 */
   adcTrigger,                 /* CR2 -- trigger */
   0,
+  ADC_SMPR2_SMP_SENSOR(sensorSampleTime) |
   ADC_SMPR2_SMP_AN10(adcSampleTime) | ADC_SMPR2_SMP_AN11(adcSampleTime) |
    ADC_SMPR2_SMP_AN12(adcSampleTime),
   ADC_SMPR3_SMP_AN1(adcSampleTime) | ADC_SMPR3_SMP_AN2(adcSampleTime),
@@ -130,9 +136,10 @@ static const ADCConversionGroup adcgrpcfg = {
   0,
   0,
   0,
-  ADC_SQR5_SQ1_N(ADC_CHANNEL_IN10) | ADC_SQR5_SQ2_N(ADC_CHANNEL_IN11) |
-   ADC_SQR5_SQ3_N(ADC_CHANNEL_IN12) |
-   ADC_SQR5_SQ4_N(ADC_CHANNEL_IN1) | ADC_SQR5_SQ5_N(ADC_CHANNEL_IN2)
+  ADC_SQR5_SQ1_N(ADC_CHANNEL_SENSOR) |
+   ADC_SQR5_SQ2_N(ADC_CHANNEL_IN10) | ADC_SQR5_SQ3_N(ADC_CHANNEL_IN11) |
+   ADC_SQR5_SQ4_N(ADC_CHANNEL_IN12) |
+   ADC_SQR5_SQ5_N(ADC_CHANNEL_IN1) | ADC_SQR5_SQ6_N(ADC_CHANNEL_IN2)
 };
 
 
@@ -200,6 +207,7 @@ int main(void) {
   configureGroup(ANALOGINS_C, PAL_MODE_INPUT_ANALOG);
   configureGroup(ANALOGINS_A, PAL_MODE_INPUT_ANALOG);
   adcStart(&ADCD1, NULL);
+  adcSTM32EnableTSVREFE();  /* enable temperature sensor */
   adcStartConversion(&ADCD1, &adcgrpcfg, analogSample, 2*ADCdepth);
 
   adcsample_t *samples;
@@ -255,20 +263,24 @@ int main(void) {
     /* average the current represented by the last channel to best filter VCC noise */
     int32_t current = 0;
     {
-      adcsample_t *currentRow = samples+4;
+      adcsample_t *currentRow = samples+5;
       do {
         current += currentRow[-1] - currentRow[0]; /* vcc/2 - current */
         currentRow += ADCchannels;
       } while (currentRow < end);
     }
 
-    float amps = ampGain * (float)(((current+ampVoff) * ampVnom) / (int32_t)adc[3]);
-    chprintf(&SD1, "#%d:%s: Vcmd=%d, Vin=%d, VcmdIn=%d, Thres=%d, Vcc/2=%d, A=%f\r\n",
-	 totalSamples, power, DAC->DOR1, adc[0], adc[1], adc[2], adc[3], amps);
+    float deltaT = adc[0] - ampTnom;
+    float amps = ((float)ampVnom / (float)adc[4]) * (ampScale+(ampTscale*deltaT)) *
+       ((float)(current+ampVoffset)+(ampToffset*deltaT));
+
+    chprintf(&SD1, "#%d:%s: Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, C=%d,Vcc/2=%d,curr=%d,A=%f\r\n",
+	 totalSamples, power, DAC->DOR1, adc[1], adc[2], adc[3], adc[0], adc[4], adc[5], amps);
     if (++count >= 10) {
-      debugPrint("@%d#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, Vcc/2=%d, curr=%d, A=%f (%d errs)",
-        chTimeNow(), totalSamples,
-                      power, DAC->DOR1, adc[0], adc[1], adc[2], adc[3], adc[4], amps, totalErrs);
+      debugPrint(
+        "@%d#%d:%s:Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, C=%d,Vcc/2=%d,curr=%d,A=%f (%d errs)",
+        chTimeNow(), totalSamples, power, DAC->DOR1,
+                      adc[1], adc[2], adc[3], adc[0], adc[4], adc[5], amps, totalErrs);
       count = 0;
     }
   }
