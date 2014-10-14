@@ -1,12 +1,12 @@
 ##############################################################################
-# Build global options
-# NOTE: Can be overridden externally.
+# ChibiOS Makefile for ZEV 7100 scooter charger
 #
+common = -ggdb
 
 # Compiler options here.
 ifeq ($(USE_OPT),)
-  USE_OPT = -O0 -ggdb
-  #-O2 -fomit-frame-pointer
+#  USE_OPT = -O0 $(common)
+  USE_OPT = -O3 $(common)
 endif
 
 # C specific options here (added to USE_OPT).
@@ -22,6 +22,16 @@ endif
 # Enable this if you want the linker to remove unused code and data
 ifeq ($(USE_LINK_GC),)
   USE_LINK_GC = yes
+endif
+
+# Linker extra options here.
+ifeq ($(USE_LDOPT),)
+  USE_LDOPT =
+endif
+
+# Enable this if you want link time optimizations (LTO)
+ifeq ($(USE_LTO),)
+  USE_LTO = no
 endif
 
 # If enabled, this option allows to compile the application in THUMB mode.
@@ -60,7 +70,7 @@ PROJECT = zev
 
 # Imported source files and paths
 CHIBIOS ?= $(HOME)/chibios
-OVERLAY = ../chibios
+VARIOUS ?= $(CHIBIOS)/os/various
 
 include $(CHIBIOS)/boards/ST_STM32L_DISCOVERY/board.mk
 include $(CHIBIOS)/os/hal/platforms/STM32L1xx/platform.mk
@@ -75,14 +85,13 @@ LDSCRIPT= $(PORTLD)/STM32L152xB.ld
 # setting.
 CSRC = $(PORTSRC) \
        $(KERNSRC) \
-       $(TESTSRC) \
        $(HALSRC) \
        $(PLATFORMSRC) \
        $(BOARDSRC) \
        $(CHIBIOS)/os/various/chprintf.c \
        $(OVERLAY)/os/dccput.c \
        $(OVERLAY)/os/debugput.c \
-       main.c
+       zev.c
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -112,10 +121,8 @@ TCPPSRC =
 # List ASM source files here
 ASMSRC = $(PORTASM)
 
-INCDIR = ../stm32l-discovery $(OVERLAY)/os \
-         $(PORTINC) $(KERNINC) $(TESTINC) \
-         $(HALINC) $(PLATFORMINC) $(BOARDINC) \
-         $(CHIBIOS)/os/various
+INCDIR = $(CHIBIOS)/mbari/stm32l \
+         $(PORTINC) $(KERNINC) $(HALINC) $(PLATFORMINC) $(BOARDINC) $(VARIOUS)
 
 #
 # Project, sources and paths
@@ -139,6 +146,7 @@ LD   = $(TRGT)gcc
 CP   = $(TRGT)objcopy
 AS   = $(TRGT)gcc -x assembler-with-cpp
 OD   = $(TRGT)objdump
+SZ   = size
 HEX  = $(CP) -O ihex
 BIN  = $(CP) -O binary
 
@@ -204,11 +212,5 @@ ULIBS =
 # End of user defines
 ##############################################################################
 
-ifeq ($(USE_FWLIB),yes)
-  include $(CHIBIOS)/ext/stm32lib/stm32lib.mk
-  CSRC += $(STM32SRC)
-  INCDIR += $(STM32INC)
-  USE_OPT += -DUSE_STDPERIPH_DRIVER
-endif
-
-include $(CHIBIOS)/os/ports/GCC/ARMCMx/rules.mk
+RULESPATH = $(CHIBIOS)/os/ports/GCC/ARMCMx
+include $(RULESPATH)/rules.mk
