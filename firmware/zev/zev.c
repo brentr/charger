@@ -180,7 +180,7 @@ int main(void) {
   sdStart(&SD1, NULL);
   configureGroup(GPIOA, 0xf, 9, PAL_MODE_ALTERNATE(7)); //TX,RX,CTS,RTS
 
-  chprintf(&SD1, "\r\n%s\r\n", signon);
+  chprintf((BaseSequentialStream *)&SD1, "\r\n%s\r\n", signon);
 
   /*
    *  Piezo buzzer output
@@ -274,7 +274,8 @@ int main(void) {
     float amps = ((float)ampVnom / (float)adc[4]) * (ampScale+(ampTscale*deltaT)) *
        ((float)(current+ampVoffset)+(ampToffset*deltaT));
 
-    chprintf(&SD1, "#%d:%s: Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, C=%d,Vcc/2=%d,curr=%d,A=%f\r\n",
+    chprintf((BaseSequentialStream *)&SD1,
+    "#%d:%s: Vcmd=%d,Vin=%d,VcmdIn=%d,Thres=%d, C=%d,Vcc/2=%d,curr=%d,A=%f\r\n",
 	 totalSamples, power, DAC->DOR1, adc[1], adc[2], adc[3], adc[0], adc[4], adc[5], amps);
     if (++count >= 10) {
       debugPrint(
