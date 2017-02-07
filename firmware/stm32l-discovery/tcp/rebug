@@ -1,0 +1,3 @@
+#!/bin/sh
+here=~/stm32l-discovery/tcp
+GDBstart=$here/restart.gdb exec $here/debug

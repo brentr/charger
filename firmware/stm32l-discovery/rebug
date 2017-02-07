@@ -1,2 +1,3 @@
 #!/bin/sh
-GDBstart=~/stm32l-discovery/restart.gdb exec debug
+here=~/stm32l-discovery
+GDBstart=$here/restart.gdb exec $here/debug "$@"
