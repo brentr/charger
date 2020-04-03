@@ -1,5 +1,5 @@
 #!/bin/sh
-#Start a gdb session with the (local) openocd target -- 2/4/17 brent@mbari.org
+#Start a gdb session with the (local) openocd target -- 3/2/20 brent@mbari.org
 #  first run make unless GDBstart env var is defined
 : ${PROJECT:=`basename $PWD`}
 : ${BINARY:=$PROJECT.elf}

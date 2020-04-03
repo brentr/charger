@@ -31,10 +31,36 @@ end
 define reload
   monitor reset halt
   load
-  tbreak main
-  continue
 end
 define remake
   make
   reload
+end
+define reset
+  monitor reset halt
+  continue
+end
+
+#the methods below facilitate starting "booted" images in bootloader's absence
+define reset2PSP
+#reset and switch to process stack
+  monitor reset halt
+#  set $psp=(void *)&__process_stack_end__
+  set $control=2
+end
+define restart
+  reset2PSP
+  jump restart
+end
+define reboot
+  reset2PSP
+  jump reboot
+end
+define bootloader
+  reset2PSP
+  jump bootloader
+end
+define start
+  tbreak main
+  reboot
 end
